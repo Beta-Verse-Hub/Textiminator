@@ -1,15 +1,53 @@
+import threading
 import keyboard
 import time
+import math
 import random
+import wave
+import pyaudio
 
+
+
+class VisionerBoss():
+
+    def __init__(self):
+        self.frame = 5
+        self.death_frame = 0
+        self.replay_delay = 20
+        self.constant_replay_delay = 20
+        self.health = 100
+        self.phase = 0
+        self.phase_delay = 20
+        self.start_of_phase = False
+        self.fight_started = False
+        self.fight_just_started = False
+
+
+class Hand():
+
+    def __init__(self, x, y):
+        self.pos = [x, y]
+        with open("Bosses/Visioner/Hand.txt", "r") as hand:
+            the_hand = hand.readlines()
+        self.looks = the_hand
+
+    def add_hand(self, Map):
+        for y in range(len(self.looks)):
+            for x in range(len(self.looks[y])):
+                if not self.looks[y][x] in ["\n"," "]:
+                    Map[y+self.pos[1]][x+self.pos[0]] = self.looks[y][x]
+
+    def on_floor(self, Map):
+        return Map[self.pos[1]+12][self.pos[0]] == "#"
 
 
 class LandMines():
 
     def __init__(self, pos, bounce):
         self.pos = pos
+        self.disport_frame = 0
         self.exploded = False
-        self.bounce = 10
+        self.bounce = 15
 
 
     def activate(self, player, Map):
@@ -17,6 +55,14 @@ class LandMines():
             player.health -= 5
             player.jump(Map, leap=self.bounce)
             self.exploded = True
+        if self.exploded and self.disport_frame < 6:
+            self.disport_frame += 1
+            with open(f"EnemyAssets/Landmine/Disport{self.disport_frame}.txt", "r") as f:
+                lines = f.readlines()
+            for y in range(len(lines)):
+                for x in range(len(lines[y])-1):
+                    if not lines[y][x] in [" ", "\n"]:
+                        Map[y+self.pos[1]-3][x+self.pos[0]-4] = lines[y][x]
 
 
 class XEnemy():
@@ -30,10 +76,11 @@ class XEnemy():
 
 class VEnemy():
 
-    def __init__(self, pos, health, fall_delay):
+    def __init__(self, pos, health, fall_delay, one_time=False):
         self.pos = pos.copy()
         self.og_pos = pos.copy()
         self.health = health
+        self.one_time = one_time
         self.fall_delay = fall_delay
         self.constant_fall_delay = fall_delay
 
@@ -69,7 +116,6 @@ class Bullet():
     def __init__(self, x, y, direction):
         self.pos = [x, y]
         self.direction = direction
-
 
     def move(self):
         self.pos[0] += self.direction
@@ -115,11 +161,11 @@ class Player():
         self.pos = [1,3]
         self.speed = 1
         self.health = 20
-        self.leap = 7
+        self.leap = 15
         self.dash_delay = 100
         self.constant_dash_delay = 100
-        self.y_acceleration = 0
-        self.gravity_accleration = 0.4
+        self.y_vel = 0
+        self.gravity_acceleration = 1
 
 
     def move(self, distance, Map):
@@ -139,25 +185,39 @@ class Player():
 
     def jump(self, Map, leap = "null"):
         if leap == "null": leap = self.leap
-        for i in range(leap):
-            try:
-                if Map[self.pos[1]-i][self.pos[0]] != "#":
-                    self.y_acceleration -= 1
-            except:
-                pass
+        if self.on_floor(Map):
+            self.y_vel = -leap
 
 
-    def gravity(self, Map):
-        for i in range(int(self.gravity_accleration)):
-            if Map[self.pos[1]+1][self.pos[0]] == "!":
-                self.health = 0
-            if not(Map[self.pos[1]+1][self.pos[0]] == "#" or Map[self.pos[1]+1][self.pos[0]] == "n"):
+    def gravity(self, Map, used_potions):
+        for i in range(round(self.y_vel)):
+            if not self.on_floor(Map):
                 self.pos[1] += 1
-        self.gravity_accleration += 0.2
+                if Map[self.pos[1]][self.pos[0]] == "!":
+                    self.health = 0
+                elif Map[self.pos[1]][self.pos[0]] == "s":
+                    used_potions.append([self.pos[0], self.pos[1]])
+                    self.speed += 1
+                elif Map[self.pos[1]][self.pos[0]] == "j":
+                    used_potions.append([self.pos[0], self.pos[1]])
+                    self.leap += 2
+                elif Map[self.pos[1]][self.pos[0]] == "h":
+                    used_potions.append([self.pos[0], self.pos[1]])
+                    self.health += 10
+                elif Map[self.pos[1]][self.pos[0]] == "d":
+                    used_potions.append([self.pos[0], self.pos[1]])
+                    self.constant_dash_delay -= 15
+                    self.dash_delay -= 15
+
+        for i in range(math.floor(self.gravity_acceleration)):
+            if not self.on_floor(Map):
+                self.gravity_acceleration += 0.1
+            else:
+                break
 
 
     def zero_acceleration_due_to_gravity(self):
-        self.gravity_accleration = 0.4
+        self.gravity_acceleration = 1
 
 
     def on_floor(self, Map):
@@ -174,6 +234,100 @@ class Player():
         Map[self.pos[1]][self.pos[0]] = "o"
         return Map
 
+
+
+def cutscene():
+    print("\n"*50, "@"*103, "\n", ("@"+" "*101+"@\n")*17, "@", " "*40, "HMM...", " "*55, "@", "\n", ("@"+" "*101+"@\n")*17, "@"*103, sep="")
+    time.sleep(3)
+    print("\n"*50, "@"*103, "\n", ("@"+" "*101+"@\n")*17, "@", " "*40, "I GUESS YOU ARE NOT THAT BORING", " "*30, "@", "\n", ("@"+" "*101+"@\n")*17, "@"*103, sep="")
+    time.sleep(3)
+    print("\n"*50, "@"*103, "\n", ("@"+" "*101+"@\n")*17, "@", " "*40, "I MUST EXPERIMENT YOU FURTHER", " "*32, "@", "\n", ("@"+" "*101+"@\n")*17, "@"*103, sep="")
+    time.sleep(3)
+
+    return "play"
+
+
+def visioner_fight(Map, boss, player, level, v_enemies, bullets, hands):
+    old_phase = boss.phase
+
+    if player.pos[1] > 7 and not boss.fight_started:
+        boss.fight_started = True
+        boss.fight_just_started = True
+
+    if boss.fight_started:
+        level = f"15 0"
+        if boss.fight_just_started:
+            boss.phase = 1
+            boss.fight_just_started = False
+
+        # phase changing
+        if boss.phase_delay <= 0 and boss.health > 0:
+            boss.phase = random.randint(1, 3)
+            boss.phase_delay = random.randint(10, 40)
+        else:
+            boss.phase_delay -= 1
+    else:
+        level = f"15"
+
+    if old_phase != boss.phase:
+        boss.start_of_phase = True
+
+    if boss.start_of_phase:
+        boss.start_of_phase = False
+
+        if boss.phase == 1:
+            flag = random.randint(0,1)
+            if flag:
+                for y in range(6, 31):
+                    bullets.append(Bullet(100, y, -1))
+            else:
+                for y in range(6, 31):
+                    bullets.append(Bullet(1, y, 1))
+
+        elif boss.phase == 2:
+            v_enemies = []
+
+            for x in range(random.randint(0,2), 101, 3):
+                v_enemies.append([VEnemy([x, 5], random.randint(3, 7), 1, True), [x, 5], True])
+
+        elif boss.phase == 3:
+            hands.append(Hand(random.randint(1,79), 6))
+            hands[len(hands)-1].add_hand(Map)
+
+        boss.phase = 0
+
+    new_Map = get_map(f"Levels/Level {level}.txt")
+
+    with open(f"Bosses/Visioner/BossAnimation{boss.frame}.txt" if boss.death_frame == 0 else f"Bosses/Visioner/BossDeath{boss.death_frame}.txt", "r") as f:
+        lines = f.readlines()
+    hit = False
+    try:
+        for y in range(len(lines)):
+            for x in range(len(lines[y])-1):
+                if Map[10+y][44+x] in ["\\","/",")","(","-"] and lines[y][x] in ["0","."] and not hit:
+                    hit = True
+                    boss.health -= 2
+                elif Map[10+y][44+x] in ["<",">","v",":","!","1","0","?"] and lines[y][x] in ["0","."," ","\n"]:
+                    pass
+                else:
+                    Map[10+y][44+x] = lines[y][x]
+            Map[10+y][43+len(lines[y])] = " "
+    except:
+        pass
+
+    # frame changing and replaying
+    if boss.frame == 9:
+        boss.frame = 1
+        boss.replay_delay = boss.constant_replay_delay
+    if boss.replay_delay <= 0:
+        boss.frame += 1
+    else:
+        boss.replay_delay -= 1
+
+    if boss.health <= 0:
+        boss.death_frame += 1
+
+    return level, v_enemies
 
 
 def update_bullets(bullets, Map, x_enemies, v_enemies, player):
@@ -253,7 +407,7 @@ def find_enemies(Map):
     return x_enemies, v_enemies, landmines, Map
 
 
-def print_map(Map, player, height, width):
+def print_map(Map, player, height, width, boss = None):
     central_part = player.pos
     strMap = ""
 
@@ -274,19 +428,14 @@ def print_map(Map, player, height, width):
                 strMap += " "
         strMap += "\n"
 
-    # wrap it with "."
+    # wrap it with "." and adding player stats
     strMap = strMap.splitlines()
     strMap = [f"@{line}@" for line in strMap]
-    strMap[0] = "\n" * 50 + "@" * (width+3)
+    strMap[0] = "\n" * 50 + " HP       " + "I" * player.health + "\n DASH     " + "I" * (player.dash_delay // 5) + "\n"
+    if boss != None:
+        strMap[0] += " BOSS HP  " + "I" * boss.health + "\n"
+    strMap[0] += "\n" + "@" * (width+3)
     strMap[-1] = "@" * (width+3)
-
-    # adding player stats
-    strMap[1] += " HP     "
-    for i in range(player.health):
-        strMap[1] += "I"
-    strMap[2] += " DASH   "
-    for i in range(player.dash_delay//5):
-        strMap[2] += "I"
 
     # print the strMap
     print("\n".join(strMap))
@@ -295,20 +444,25 @@ def print_map(Map, player, height, width):
 def game_loop(level):
     player = Player()
     bullets = []
-    x_enemies, v_enemies, landmines = [], [], []
+    x_enemies, v_enemies, landmines, hands = [], [], [], []
     slash = []
     used_potions = []
     jump_button_pressed, left_shoot, right_shoot, left_slash, right_slash, flash_fall = False, False, False, False, False, False
     mainMap = get_map(f"Levels/Level {level}.txt")
     x_enemy_positions, v_enemy_positions, landmine_positions, Map = find_enemies(mainMap.copy())
 
+    if level[0:2] == "15":
+        boss1 = VisionerBoss()
+
+    player.pos = [1,3]
+
     # ADDING ENEMIES
     for i in x_enemy_positions:
-        x_enemies.append([XEnemy(i, 30, 7), i])
+        x_enemies.append([XEnemy(i, random.randint(20, 35), 7), i])
     for i in v_enemy_positions:
-        v_enemies.append([VEnemy(i, 5, 1), i, True])
+        v_enemies.append([VEnemy(i, random.randint(3, 7), 1), i, True])
     for i in landmine_positions:
-        landmines.append(LandMines(i, 7))
+        landmines.append(LandMines(i, random.randint(5, 10)))
 
     # UPDATE LOOP
     while not keyboard.is_pressed("esc") and not player.health <= 0:
@@ -342,23 +496,32 @@ def game_loop(level):
         if Map[player.pos[1]+1][player.pos[0]] == "n":
             player.jump(Map)
 
-        # ACCELEARTION SYSTEM
-        if player.on_ceiling(Map):
-            player.y_accleration = 0
-            player.gravity(Map)
-        if player.y_acceleration < 0:
-            player.y_acceleration += 1
-            if not player.on_ceiling(Map):
-                player.pos[1] -= 1
+        # Y VELOCITY SYSTEM
+
+        if player.y_vel < 0:
+            for i in range(abs(math.ceil(player.y_vel/4))):
+                if not player.on_ceiling(Map):
+                    player.pos[1] -= 1
+                else:
+                    player.y_vel = 0
+                    break
+            player.y_vel += abs(math.ceil(player.y_vel/4))
+        elif player.y_vel > 0:
+            player.gravity(Map, used_potions)
+            if player.on_floor(Map):
+                player.y_vel = 0
+
+        if not player.on_floor(Map):
+            player.y_vel += player.gravity_acceleration
+
+        if player.on_floor(Map):
             player.zero_acceleration_due_to_gravity()
-        elif not player.on_floor(Map):
-            player.gravity(Map)
 
         # MOVEMENT SYSTEM
         if keyboard.is_pressed("left"):
-            player.move(-3*(player.speed) if keyboard.is_pressed("down") else -(player.speed), Map)
+            player.move(-3*(player.speed) if keyboard.is_pressed("s") else -(player.speed), Map)
         if keyboard.is_pressed("right"):
-            player.move(3*(player.speed) if keyboard.is_pressed("down") else (player.speed), Map)
+            player.move(3*(player.speed) if keyboard.is_pressed("s") else (player.speed), Map)
 
         # DASH SYSTEM
         if keyboard.is_pressed("e") and player.dash_delay >= player.constant_dash_delay:
@@ -380,47 +543,57 @@ def game_loop(level):
         if keyboard.is_pressed("a") and Map[player.pos[1]][player.pos[0]-1] != "#" and not left_shoot:
             bullets.append(Bullet(player.pos[0]-1, player.pos[1], -1))
             left_shoot = True
+            sound_thread = threading.Thread(target=get_music)
+            sound_thread.start()
         elif not keyboard.is_pressed("a"):
             left_shoot = False
         if keyboard.is_pressed("d") and Map[player.pos[1]][player.pos[0]+1] != "#" and not right_shoot:
             bullets.append(Bullet(player.pos[0]+1, player.pos[1], 1))
             right_shoot = True
+            sound_thread = threading.Thread(target=get_music)
+            sound_thread.start()
         elif not keyboard.is_pressed("d"):
             right_shoot = False
 
         # REMOVING USED POTIONS
 
         for i in used_potions:
-            Map[i[1]][i[0]] = " "
+            try:
+                Map[i[1]][i[0]] = " "
+            except IndexError:
+                pass
 
         # POTION SYSTEM
 
-        if Map[player.pos[1]][player.pos[0]] == "s":
-            used_potions.append([player.pos[0], player.pos[1]])
-            player.speed += 1
-        elif Map[player.pos[1]][player.pos[0]] == "j":
-            used_potions.append([player.pos[0], player.pos[1]])
-            player.leap += 2
-        elif Map[player.pos[1]][player.pos[0]] == "h":
-            used_potions.append([player.pos[0], player.pos[1]])
-            player.health += 10
-        elif Map[player.pos[1]][player.pos[0]] == "d":
-            used_potions.append([player.pos[0], player.pos[1]])
-            player.constant_dash_delay -= 15
-            player.dash_delay -= 15
+        try:
+            if Map[player.pos[1]][player.pos[0]] == "s":
+                used_potions.append([player.pos[0], player.pos[1]])
+                player.speed += 1
+            elif Map[player.pos[1]][player.pos[0]] == "j":
+                used_potions.append([player.pos[0], player.pos[1]])
+                player.leap += 2
+            elif Map[player.pos[1]][player.pos[0]] == "h":
+                used_potions.append([player.pos[0], player.pos[1]])
+                player.health += 10
+            elif Map[player.pos[1]][player.pos[0]] == "d":
+                used_potions.append([player.pos[0], player.pos[1]])
+                player.constant_dash_delay -= 15
+                player.dash_delay -= 15
+        except:
+            pass
 
         # FLASH FALL SYSTEM
 
         if keyboard.is_pressed("x") and not flash_fall:
             flash_fall = True
-            for i in range(int(player.gravity_accleration)):
-                Map[player.pos[1]-(i+1)][player.pos[0]] = "|"
-        elif flash_fall and player.on_floor(Map):
-            flash_fall = False
-            Map[player.pos[1]-1][player.pos[0]] = "|"
+            while True:
+                Map[player.pos[1]][player.pos[0]] = "|"
+                if not Map[player.pos[1]+1][player.pos[0]] in ["#","n","!"]:
+                    player.pos[1] += 1
+                else:
+                    break
         elif flash_fall:
-            for i in range(int(player.gravity_accleration)):
-                Map[player.pos[1]-(i+1)][player.pos[0]] = "|"
+            flash_fall = False
 
         # SLASHING SYSTEM
 
@@ -477,12 +650,27 @@ def game_loop(level):
                 if v_enemies[i][2]:
                     v_enemies[i][2], Map = enemy.fall(Map)
                 else:
+                    if enemy.one_time:
+                        v_enemies.pop(i)
+                        continue
                     v_enemies[i][2], Map = enemy.rise(Map)
                 for i in range(enemy.pos[1]-enemy.og_pos[1]):
                     try:
                         Map[enemy.og_pos[1]+i][enemy.pos[0]] = ":"
                     except IndexError:
                         pass
+
+        # HIT BY V ENEMY CHECK
+        if Map[player.pos[1]][player.pos[0]] == "v":
+            player.health -= 1
+
+        # MAKE HAND PUNCH THE FLOOR
+        for i in range(len(hands) - 1, -1, -1):
+            if hands[i].on_floor(Map):
+                hands.pop(i)
+            else:
+                hands[i].pos[1] += 1
+                hands[i].add_hand(Map)
 
         # ADDING BULLET AND MOVING IT
         update_bullets(bullets, Map, x_enemies, v_enemies, player)
@@ -493,13 +681,26 @@ def game_loop(level):
         elif player.dash_delay > player.constant_dash_delay:
             player.dash_delay = player.constant_dash_delay
 
+        # VISIONER FIGHT
+        if level[0:2] == "15":
+            level, v_enemies = visioner_fight(Map, boss1, player, level, v_enemies, bullets, hands)
+
         # WIN THE GAME
         if Map[player.pos[1]][player.pos[0]] == "%" and enemy_number == 0:
             return f"L{int(level)+1}"
+        if level[0:2] == "15":
+            if boss1.death_frame == 24:
+                return cutscene()
 
         Map = player.add_player(Map)
-        print_map(Map, player, 36, 100)
+        if level[0:2] == "15":
+            print_map(Map, player, 36, 100, boss1)
+        else:
+            print_map(Map, player, 36, 100)
+
         if keyboard.is_pressed("r"):
+            if level[0:2] == "15":
+                return f"L15"
             return f"L{level}"
         elif keyboard.is_pressed("m"):
             return "play"
@@ -510,9 +711,12 @@ def game_loop(level):
         print("@"*103, "\n", ("@"+" "*101+"@\n")*17, "@", " "*46, "You Died", " "*47, "@", "\n", ("@"+" "*101+"@\n")*2, "@", " "*45, "R to Retry", " "*46, "@", "\n", "@", " "*45, "M for Menu", " "*46, "@", "\n", ("@"+" "*101+"@\n")*13, "@"*103, sep="")
         while not keyboard.is_pressed("esc"):
             if keyboard.is_pressed("r"):
+                if  level[0:2] == "15":
+                    return f"L15"
                 return f"L{level}"
             elif keyboard.is_pressed("m"):
                 return "play"
+
 
 def main_menu(height, width):
     up_pressed = False
@@ -540,7 +744,7 @@ def main_menu(height, width):
         options[select] = "0" + options[select][1:]
 
         # MAKE MAP
-        Map += (" "*(width+1)+"\n")*14
+        Map += (" "*(width+1)+"\n")*15
         Map += " "*44
         Map += "TEXTIMINATOR"
         Map += " "*45
@@ -553,7 +757,7 @@ def main_menu(height, width):
             Map += " "*(57 - len(i))
             Map += "\n"
 
-        Map += (" "*(width+1)+"\n")*14
+        Map += (" "*(width+1)+"\n")*15
 
         # wrap Map with "@"
         Map = Map.splitlines()
@@ -590,7 +794,7 @@ def play_menu(height, width):
     while not keyboard.is_pressed("esc"):
         Map = "\n" * 50
 
-        if keyboard.is_pressed("left") and not left_pressed and select != 0:
+        if keyboard.is_pressed("left") and not left_pressed and select != -1:
             select -= 1
             left_pressed = True
         elif not keyboard.is_pressed("left"):
@@ -610,7 +814,12 @@ def play_menu(height, width):
         for i in range(height):
 
             Map += "@"
-            if i == 5:
+
+            if i == 1:
+                Map += f" {"0" if select == -1 else " "} BACK"
+                Map += " " * (width-6)
+
+            elif i == 5:
                 Map += " " * ((width//2)-3)
                 Map += "LEVELS"
                 Map += " " * ((width//2)-2)
@@ -631,34 +840,58 @@ def play_menu(height, width):
         print(Map)
         time.sleep(0.03)
 
+    if select == -1:
+        return "main"
     return f"L{select+1}"
 
 
 def credits_menu(height, width):
     Map = "\n" * 50
-    Map += "@"*(width+3)
+    Map += "@"*(width+3) + "\n"
     Map += ("@" + (" "*(width+1)) + "@\n")*14
     Map += ("@" + (" "*42) + ("MUSIC:") + (" "*53) + "@\n") + ("@" + (" "*43) + ("Slok Dube") + (" "*49) + "@\n") + ("@" + (" "*43) + ("Vinod Dube") + (" "*48) + "@\n")
     Map += ("@" + (" "*(width+1)) + "@\n")*2
-    Map += ("@" + (" "*42) + ("EVERTHING ELSE:") + (" "*46) + "@\n") + ("@" + (" "*43) + ("Baibhav Kumar Jha") + (" "*41) + "@\n")
+    Map += ("@" + (" "*42) + ("EVERTHING ELSE:") + (" "*44) + "@\n") + ("@" + (" "*43) + ("Baibhav Kumar Jha") + (" "*41) + "@\n")
     Map += ("@" + (" "*(width+1)) + "@\n")*15
     Map += "@"*(width+3)
-    press = False
+    print(Map)
 
     while not keyboard.is_pressed("esc"):
-        if keyboard.is_pressed("enter") and press:
+        if keyboard.is_pressed("space"):
             return "main"
-        else:
-            press = True
+
     return "exit"
 
+
+def get_music():
+    with wave.open("Musics and Sound Effects/Gunjutsu.wav", "rb") as wf:
+        pa = pyaudio.PyAudio()
+
+        stream = pa.open(format=pa.get_format_from_width(wf.getsampwidth()),
+                        channels=wf.getnchannels(),
+                        rate=wf.getframerate(),
+                        output=True)
+
+        while len(data := wf.readframes(100)):
+            stream.write(data)
+
+        stream.close()
+
+        pa.terminate()
 
 
 if __name__ == "__main__":
     height, width = 36, 100
     menu = "main"
+
     while not keyboard.is_pressed("esc"):
-        if menu == "main": menu = main_menu(height, width)
-        elif menu == "play": menu = play_menu(height, width)
-        elif menu[0] == "L": menu = game_loop(menu[1:])
-        elif menu == "exit":break
+        if menu == "main":
+            menu = main_menu(height, width)
+        elif menu == "play":
+            menu = play_menu(height, width)
+        elif menu == "credits":
+            menu = credits_menu(height, width)
+        elif menu[0] == "L":
+            menu = game_loop(menu[1:])
+        elif menu == "exit":
+            break
